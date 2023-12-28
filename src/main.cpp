@@ -5,6 +5,7 @@
 #include <utility>
 #include <vector>
 #include <map>
+#include <cmath>
 
 using namespace std;
 
@@ -45,7 +46,7 @@ vector<string> SplitIntoWords(const string& text) {
 
 struct Document {
     int id;
-    int relevance;
+    double relevance;
 };
 
 class SearchServer {
@@ -56,10 +57,12 @@ public:
         }
     }
 
-    void AddDocument(int document_id, const string& document) {       
-        for(const string& word: SplitIntoWordsNoStop(document)) {
-            documents_[word].insert(document_id);
+    void AddDocument(int document_id, const string& document) { 
+        const auto& words = SplitIntoWordsNoStop(document);      
+        for(const string& word: words) {
+            word_to_document_freqs_[word][document_id] += 1/static_cast<double>(words.size());
         }
+        ++document_count_;
     }
 
     vector<Document> FindTopDocuments(const string& raw_query) const {
@@ -82,9 +85,11 @@ private:
         set<string> minus_words_;
     };
 
-    map<string,set<int>> documents_;
+    map<string,map<int, double>> word_to_document_freqs_;
 
     set<string> stop_words_;
+
+    int document_count_ = 0;
 
     bool IsStopWord(const string& word) const {
         return stop_words_.count(word) > 0;
@@ -112,28 +117,33 @@ private:
         return words;
     }
 
+    const double ComputeWordIDF(const string& word) const {
+        return log(document_count_/static_cast<double>(word_to_document_freqs_.at(word).size()));
+    }
+
     vector<Document> FindAllDocuments(const Query& query_words) const {
-        map<int,int> id_relevance;
+        map<int,double> id_relevance;
         vector<Document> matched_documents;
         for(const auto& word: query_words.plus_words_) {
-            if(documents_.count(word) == 1) {
-                for(const auto& id: documents_.at(word)) {
-                    ++id_relevance[id];
-                }
-            }            
+            if(word_to_document_freqs_.count(word) == 1) {                
+                for (const auto& [id,tf]: word_to_document_freqs_.at(word)) {
+                    id_relevance[id] += (ComputeWordIDF(word) * tf);
+                }    
+            }
         }
         for(const auto& word: query_words.minus_words_) {
-            if(documents_.count(word) == 1) {
-                for(const auto& id: documents_.at(word)) {
+            if(word_to_document_freqs_.count(word) == 1) {
+                for(const auto& [id, _] : word_to_document_freqs_.at(word)) {
                     id_relevance.erase(id);
                 }
-            }            
+            }
         }
+
         for(const auto& [id,relevance]: id_relevance) {
             matched_documents.push_back({id,relevance});
         }
         return matched_documents;
-    }   
+    }
 };
 
 SearchServer CreateSearchServer() {
